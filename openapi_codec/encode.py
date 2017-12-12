@@ -127,6 +127,43 @@ def _get_field_type(field):
         coreschema.Object: 'object',
     }.get(field.schema.__class__, 'string')
 
+def _get_schema_field_type(property):
+    return {
+        coreschema.String: 'string',
+        coreschema.Integer: 'integer',
+        coreschema.Number: 'number',
+        coreschema.Boolean: 'boolean',
+        coreschema.Array: 'array',
+        coreschema.Object: 'object',
+    }.get(property.__class__, 'string')
+
+def _get_nested_object_fields(field):
+    try:
+        field_properties = field.schema.properties
+    except AttributeError:
+        field_properties = field.properties
+
+    properties = {}
+    for key, property in field_properties.items():
+        field_description = _get_field_description(property)
+        field_type = _get_schema_field_type(property)
+        properties[key] = {
+            'type': field_type,
+            'description': field_description
+        }
+        if field_type == 'object':
+            properties[key]['properties'] = _get_nested_object_fields(property)
+        if field_type == 'array':
+            array_type = _get_schema_field_type(property.items)
+            array_properties = {
+                'type': array_type,
+            }
+            if array_type == 'object':
+                array_properties['properties'] = _get_nested_object_fields(property.items)
+            properties[key]['items'] = array_properties
+    return properties
+
+
 
 def _get_parameters(link, encoding):
     """
@@ -156,13 +193,20 @@ def _get_parameters(link, encoding):
             else:
                 # Expand coreapi fields with location='form' into a single swagger
                 # parameter, with a schema containing multiple properties.
-
                 schema_property = {
                     'description': field_description,
                     'type': field_type,
                 }
+                if field_type == 'object':
+                    schema_property['properties'] = _get_nested_object_fields(field)
                 if field_type == 'array':
-                    schema_property['items'] = {'type': 'string'}
+                    array_type = _get_schema_field_type(field.schema.items)
+                    array_properties = {
+                        'type': array_type,
+                    }
+                    if array_type == 'object':
+                        array_properties['properties'] = _get_nested_object_fields(field.schema.items)
+                    schema_property['items'] = array_properties
                 properties[field.name] = schema_property
                 if field.required:
                     required.append(field.name)
